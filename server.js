@@ -1,92 +1,54 @@
+require("dotenv").config();
+
 const admin = require("firebase-admin");
 const express = require("express");
-
 const app = express();
 app.use(express.json());
 
-// Load Firebase admin service account
-const serviceAccount = require("./freemycost-dev-firebase-adminsdk-fbsvc-ae9d067ab1.json");
+// decode Firebase admin JSON from BASE64 env variable
+const base64 = process.env.ADMIN_JSON_BASE64;
 
-// Initialize admin SDK
+if (!base64) {
+  console.error("❌ ADMIN_JSON_BASE64 missing in environment!");
+  process.exit(1);
+}
+
+const jsonString = Buffer.from(base64, "base64").toString("utf8");
+const serviceAccount = JSON.parse(jsonString);
+
+// init firebase admin
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert(serviceAccount)
 });
 
-// Endpoint to send notification to topic: all-users
-app.post("/notify-all", async (req, res) => {
-  try {
-    const { title, body } = req.body;
-
-    const message = {
-      notification: { title, body },
-      topic: "all-users",
-    };
-
-    await admin.messaging().send(message);
-    return res.json({ success: true });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({ success: false, error });
-  }
-});
-
-app.post('/subscribe', async (req, res) => {
-  try {
-    const { token } = req.body;
-    if (!token) return res.status(400).json({ error: 'Token required' });
-
-    await admin.messaging().subscribeToTopic(token, 'all-users');
-
-    return res.json({ success: true });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
-});
-
-//---------------------------------------------
-// ⭐ STEP: SUBSCRIBE A TOKEN TO ANY TOPIC
-//---------------------------------------------
+// =====================================
+// SUBSCRIBE AND SEND ENDPOINTS
+// =====================================
 app.post("/subscribe-topic", async (req, res) => {
   try {
     const { token, topic } = req.body;
-
-    if (!token || !topic) {
-      return res.status(400).json({ error: "token and topic required" });
-    }
-
+    if (!token || !topic) throw new Error("token and topic required");
     await admin.messaging().subscribeToTopic(token, topic);
-
-    return res.json({ success: true, subscribed: true });
+    res.json({ success: true });
   } catch (err) {
-    console.error("Topic subscribe error:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-//---------------------------------------------
-// ⭐ STEP: SEND BROADCAST TO TOPIC
-//---------------------------------------------
 app.post("/send-topic", async (req, res) => {
   try {
     const { topic, title, body, url } = req.body;
-
-    if (!topic) return res.status(400).json({ error: "topic required" });
-
-    const message = {
+    if (!topic) throw new Error("topic required");
+    await admin.messaging().send({
       topic,
       notification: { title, body },
-      data: { url: url || "/" },
-    };
-
-    await admin.messaging().send(message);
-    return res.json({ success: true, sent: true });
+      data: { url: url || "/" }
+    });
+    res.json({ success: true });
   } catch (err) {
-    console.error("Send topic broadcast failed:", err);
-    return res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Start backend server
-app.listen(4000, () => {
-  console.log("Backend running on http://localhost:4000");
-});
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => console.log("🔥 Backend ready on port " + PORT));
